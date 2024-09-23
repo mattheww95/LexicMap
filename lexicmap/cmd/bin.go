@@ -90,6 +90,11 @@ var binCmd = &cobra.Command{
 		searchGenomes := make(map[string]bool) // Making a set of target genomes
 		var previous *SearchFields
 		if headerLine {
+			scanner.Scan()
+			if scanner.Text() == "" {
+				checkError()
+			}
+
 			search_val := ProcessInput(scanner.Text())
 			searchGenomes[search_val.query] = true
 			values_to_append := make([]*SearchFields, 0)
@@ -141,7 +146,8 @@ var binCmd = &cobra.Command{
 					//IdentifyBestHit(val)
 					continue
 				} else {
-					log.Infof("Missing %s in search output.", fastq_id)
+					//log.Infof("Missing %s in search output.", fastq_id)
+					break
 				}
 
 			}
