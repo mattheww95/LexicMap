@@ -6,7 +6,6 @@ import (
 	"strconv"
 )
 
-
 type SearchFields struct {
 	query, qseq, sgenome, sseqid, sseq, qcovGnm, hsp, qcovHSP, alenHSP, pident, sstr, cigar, align string
 	qlen, gaps, slen, qstart, qend, sstart, send, hits                                             int

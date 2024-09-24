@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +20,9 @@ import (
 const ShortHeader string = "query\tqlen\thits\tsgenome\tsseqid\tqcovGnm\thsp\tqcovHSP\talenHSP\tpident\tgaps\tqstart\tqend\tsstart\tsend\tsstr\tslen"
 const LongHeader string = "query\tqlen\thits\tsgenome\tsseqid\tqcovGnm\thsp\tqcovHSP\talenHSP\tpident\tgaps\tqstart\tqend\tsstart\tsend\tsstr\tslen\tcigar\tqseq\tsseq\talign"
 
+var FastaList []string = []string{".fasta", ".fna", ".fa"}
+var FastqList []string = []string{".fastq", ".fq"}
+
 var binCmd = &cobra.Command{
 	Use:   "bin",
 	Short: "Bin input sequences based on the output of search",
@@ -27,7 +31,7 @@ var binCmd = &cobra.Command{
 		//opt := getOptions(cmd)
 		seq.ValidateSeq = false
 
-		outFile := getFlagString(cmd, "out-file")
+		outDirectory := getFlagString(cmd, "out-dir")
 
 		bufferSizeS := getFlagString(cmd, "buffer-size")
 		if bufferSizeS == "" {
@@ -49,10 +53,13 @@ var binCmd = &cobra.Command{
 			log.Infof("Input file given: %s", report)
 		}
 
-		outFileClean := filepath.Clean(outFile)
-		if !isStdin(report) && filepath.Clean(report) == outFileClean {
-			checkError(fmt.Errorf("out file should not be one of the input file"))
+		_, err = os.Stat(outDirectory)
+		if !os.IsNotExist(err) {
+			checkError(fmt.Errorf("Output directory should not exist."))
 		}
+
+		err = os.Mkdir(outDirectory, 0755)
+		checkError(err)
 
 		files := getFileListFromArgsAndFile(cmd, args, true, "infile-list", true)
 		if len(files) == 1 {
@@ -92,11 +99,11 @@ var binCmd = &cobra.Command{
 		if headerLine {
 			scanner.Scan()
 			if scanner.Text() == "" {
-				checkError()
+				checkError(fmt.Errorf("First line of file is empty.\n"))
 			}
 
 			search_val := ProcessInput(scanner.Text())
-			searchGenomes[search_val.query] = true
+			searchGenomes[search_val.sgenome] = true
 			values_to_append := make([]*SearchFields, 0)
 			values_to_append = append(values_to_append, search_val)
 			allInputs[search_val.query] = values_to_append
@@ -105,6 +112,7 @@ var binCmd = &cobra.Command{
 
 		var search_val *SearchFields
 
+		log.Info("Reading binned data.")
 		for scanner.Scan() {
 			line = scanner.Text()
 			if line == "" {
@@ -128,7 +136,17 @@ var binCmd = &cobra.Command{
 		checkError(scanner.Err())
 		checkError(fh.Close())
 		var record *fastx.Record
+
+		// maintain a list of output locations in order to obey the restriction on maximum open files at a time
+		outputWrites := make(map[string][]*[]byte)
+
+		log.Info("Assigning queries to genomes.")
+		// Organize output files
 		for _, file := range files {
+			// Initialize outputWrites with each genome to be written too
+			for key := range searchGenomes {
+				outputWrites[key] = make([]*[]byte, 0, 1)
+			}
 			fastxReader, err := fastx.NewReader(nil, file, "")
 			checkError(err)
 			for {
@@ -141,27 +159,66 @@ var binCmd = &cobra.Command{
 					break
 				}
 				fastq_id := string(record.ID)
-				//if val, ok := allInputs[fastq_id]; ok {
-				if _, ok := allInputs[fastq_id]; ok {
-					//IdentifyBestHit(val)
-					continue
+				if val, ok := allInputs[fastq_id]; ok {
+					IdentifyBestHit(val, &outputWrites, record)
+					val = nil // remove value from memory
 				} else {
-					//log.Infof("Missing %s in search output.", fastq_id)
-					break
+					log.Infof("Missing %s in search output.", fastq_id)
+					continue
 				}
-
 			}
 			fastxReader.Close()
+			log.Info("Writing records.")
+			for key, val := range outputWrites {
+				var output_file string
+				if StringContains(file, &FastaList) {
+					output_file = fmt.Sprintf("%s.fasta.gz", key)
+				} else if StringContains(file, &FastqList) {
+					output_file = fmt.Sprintf("%s.fastq.gz", key)
+				} else {
+					checkError(fmt.Errorf("Unrecognized input type %s", file))
+				}
+				output := filepath.Join(outDirectory, output_file)
+				outfh, gw, w, err := outStream(output, true, 1)
+				checkError(err)
+				defer func() {
+					outfh.Flush()
+					if gw != nil {
+						gw.Close()
+					}
+					w.Close()
+				}()
+
+				for _, record := range val {
+					outfh.Write(*record)
+				}
+			}
+
 		}
-		fmt.Println(searchGenomes)
+
 	},
+}
+
+// / Check if any string contains a substring
+func StringContains(input string, substr *[]string) bool {
+	for _, key := range *substr {
+		if strings.Contains(input, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // / A function for future iteration for identification of an
 // / optimal hit per a read if one exists.
-func IdentifyBestHit(search_output []*SearchFields) {
+func IdentifyBestHit(search_output []*SearchFields, output_genomes *map[string][]*[]byte, fastx *fastx.Record) {
+	var previous string = ""
 	for _, value := range search_output {
-		fmt.Printf("%+v\n", value)
+		if value.sgenome != previous {
+			read := fastx.Format(0)
+			(*output_genomes)[value.sgenome] = append((*output_genomes)[value.sgenome], &read)
+		}
+		previous = value.sgenome
 	}
 }
 
@@ -188,8 +245,8 @@ func CheckRegex(line string, header_match string) bool {
 func init() {
 	utilsCmd.AddCommand(binCmd)
 
-	binCmd.Flags().StringP("out-file", "o", "-",
-		formatFlagUsage(`Out file, supports and recommends a ".gz" suffix ("-" for stdout).`))
+	binCmd.Flags().StringP("out-dir", "o", "binned",
+		formatFlagUsage(`Output directory, supports and recommends a ".gz" suffix ("-" for stdout).`))
 
 	binCmd.Flags().StringP("report", "r", "",
 		formatFlagUsage(`The generated output of the lexicmap`))
