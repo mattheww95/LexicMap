@@ -19,6 +19,7 @@ import (
 
 const ShortHeader string = "query\tqlen\thits\tsgenome\tsseqid\tqcovGnm\thsp\tqcovHSP\talenHSP\tpident\tgaps\tqstart\tqend\tsstart\tsend\tsstr\tslen"
 const LongHeader string = "query\tqlen\thits\tsgenome\tsseqid\tqcovGnm\thsp\tqcovHSP\talenHSP\tpident\tgaps\tqstart\tqend\tsstart\tsend\tsstr\tslen\tcigar\tqseq\tsseq\talign"
+const UnspecifiedBin = "NotMapped"
 
 var FastaList []string = []string{".fasta", ".fna", ".fa"}
 var FastqList []string = []string{".fastq", ".fq"}
@@ -147,7 +148,9 @@ var binCmd = &cobra.Command{
 			for key := range searchGenomes {
 				outputWrites[key] = make([]*[]byte, 0, 1)
 			}
+			outputWrites[UnspecifiedBin] = make([]*[]byte, 0, 1)
 			fastxReader, err := fastx.NewReader(nil, file, "")
+
 			checkError(err)
 			for {
 				record, err = fastxReader.Read()
@@ -163,18 +166,19 @@ var binCmd = &cobra.Command{
 					IdentifyBestHit(val, &outputWrites, record)
 					val = nil // remove value from memory
 				} else {
-					log.Infof("Missing %s in search output.", fastq_id)
+					read := record.Format(0)
+					outputWrites[UnspecifiedBin] = append(outputWrites[UnspecifiedBin], &read)
 					continue
 				}
 			}
 			fastxReader.Close()
-			log.Info("Writing records.")
+			log.Infof("Binning records for %s", file)
 			for key, val := range outputWrites {
 				var output_file string
-				if StringContains(file, &FastaList) {
-					output_file = fmt.Sprintf("%s.fasta.gz", key)
-				} else if StringContains(file, &FastqList) {
+				if StringContains(file, &FastqList) {
 					output_file = fmt.Sprintf("%s.fastq.gz", key)
+				} else if StringContains(file, &FastaList) {
+					output_file = fmt.Sprintf("%s.fasta.gz", key)
 				} else {
 					checkError(fmt.Errorf("Unrecognized input type %s", file))
 				}
