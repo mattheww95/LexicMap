@@ -48,9 +48,17 @@ func outStream(file string, gzipped bool, level int) (*bufio.Writer, io.WriteClo
 			os.MkdirAll(dir, 0755)
 		}
 
-		w, err = os.Create(file)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("fail to write %s: %s", file, err)
+		_, err = os.Stat(file)
+		if errors.Is(err, os.ErrNotExist) {
+			w, err = os.Create(file) // Prevent truncating existing file
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("fail to write %s: %s", file, err)
+			}
+		} else {
+			w, err = os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("fail to write %s: %s", file, err)
+			}
 		}
 	}
 

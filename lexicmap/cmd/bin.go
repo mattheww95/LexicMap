@@ -74,7 +74,7 @@ var binCmd = &cobra.Command{
 
 		_, err = os.Stat(outDirectory)
 		if !os.IsNotExist(err) {
-			checkError(fmt.Errorf("Output directory should not exist."))
+			checkError(fmt.Errorf("output directory should not exist"))
 		}
 
 		err = os.Mkdir(outDirectory, 0755)
@@ -109,7 +109,7 @@ var binCmd = &cobra.Command{
 		if headerLine {
 			scanner.Scan()
 			if scanner.Text() == "" {
-				checkError(fmt.Errorf("First line of file is empty.\n"))
+				checkError(fmt.Errorf("first line of file is empty"))
 			}
 
 			search_val := ProcessInput(scanner.Text())
@@ -150,7 +150,7 @@ var binCmd = &cobra.Command{
 		var record *fastx.Record
 		SequenceTracker := 0
 		var BasesInMemory uint64 = 0
-		var FlushBasesThreshold uint64 = 1_000_000_000 // Flush when one million reads are in memory
+		var FlushBasesThreshold uint64 = 4_000_000_000 // Flush when x amount of bases are in memory
 
 		log.Info("Assigning queries to genomes.")
 		// Organize output files
@@ -173,7 +173,7 @@ var binCmd = &cobra.Command{
 					checkError(err)
 					break
 				}
-				fastq_id := ByteSliceToString(record.ID)
+				fastq_id := string(record.ID)
 				BasesInMemory = BasesInMemory + uint64(len(record.Seq.Seq))
 				read := record.Format(0)
 				if val, ok := allInputs[fastq_id]; ok {
@@ -186,12 +186,11 @@ var binCmd = &cobra.Command{
 				SequenceTracker++
 				if (SequenceTracker%log_read_interval) == 0 && verbose {
 					speed := float64(SequenceTracker) / time.Since(timeStart1).Minutes()
-					fmt.Fprintf(os.Stderr, "Processed: %d of %d records %.3f matches per minute\r", SequenceTracker, allInputs_l, speed)
+					fmt.Fprintf(os.Stderr, "Processed: %d of %d records %.3f matches per minute \r", SequenceTracker, allInputs_l, speed)
 					if BasesInMemory >= FlushBasesThreshold {
 						// Flush the outputs periodically to prevent the maps from growing too large
 						// causing paging to disk
 						if bin_unique {
-							// TODO outputs not being checked for appending
 							WriteBinnedReads(&outputWrites_unq, file, outDirectory, UniqueBinned, false)
 							WriteBinnedReads(&outputWrites, file, outDirectory, AllBinned, true)
 						} else {
@@ -212,6 +211,7 @@ var binCmd = &cobra.Command{
 			}
 			BasesInMemory = 0
 		}
+		log.Info("Done")
 	},
 }
 
@@ -224,9 +224,9 @@ func ByteSliceToString(bs []byte) string {
 func CreateOutputGroups(genomes *map[string]bool, unspecified_bin string) map[string][]*[]byte {
 	outputWrites := make(map[string][]*[]byte)
 	for key := range *genomes {
-		outputWrites[key] = make([]*[]byte, 0, 1)
+		outputWrites[key] = make([]*[]byte, 0, 10)
 	}
-	outputWrites[unspecified_bin] = make([]*[]byte, 0, 1)
+	outputWrites[unspecified_bin] = make([]*[]byte, 0, 10)
 	return outputWrites
 }
 
@@ -239,23 +239,20 @@ func GetOutputFile(input_file string, output_directory string, output_name strin
 	} else if StringContains(input_file, &FastaList) {
 		output_file = fmt.Sprintf("%s.fasta.gz", output_name)
 	} else {
-		checkError(fmt.Errorf("Unrecognized input type %s", input_file))
+		checkError(fmt.Errorf("unrecognized input type %s", input_file))
 	}
-
-	if nested_directory != "" {
+	if nested_directory == "" {
 		output = filepath.Join(output_directory, output_file)
 	} else {
 		output = filepath.Join(output_directory, nested_directory, output_file)
 	}
-
 	return output
 }
 
 func WriteBinnedReads(outputs *map[string][]*[]byte, file_name string, output_directory string, nested_string string, clear_records bool) {
 	for key, val := range *outputs {
 		output := GetOutputFile(file_name, output_directory, key, nested_string)
-		outfh, gw, w, err := outStream(output, true, 1)
-
+		outfh, gw, w, err := outStream(output, true, 9)
 		checkError(err)
 
 		for _, record := range val {
@@ -265,7 +262,7 @@ func WriteBinnedReads(outputs *map[string][]*[]byte, file_name string, output_di
 			}
 		}
 		if clear_records {
-			val = val[:0]
+			val = nil
 		}
 		outfh.Flush()
 		if gw != nil {
@@ -274,7 +271,6 @@ func WriteBinnedReads(outputs *map[string][]*[]byte, file_name string, output_di
 		w.Close()
 	}
 	runtime.GC()
-
 }
 
 // / Check if any string contains a substring
@@ -318,11 +314,7 @@ func ProcessInput(line string) *SearchFields {
 func CheckRegex(line string, header_match string) bool {
 	match, err := regexp.MatchString(header_match, line)
 	checkError(err)
-
-	if match {
-		return true
-	}
-	return false
+	return match
 }
 
 func Append(slice []*[]byte, new_value ...*[]byte) []*[]byte {
@@ -352,7 +344,7 @@ func init() {
 		formatFlagUsage(`Size of buffer, supported unit: K, M, G. You need increase the value when "bufio.Scanner: token too long" error reported`))
 
 	binCmd.Flags().BoolP("bin-unique-reads", "u", true,
-		formatFlagUsage("Create separate reads from unique source into a seperate folder."))
+		formatFlagUsage("Create separate reads from unique source into a separate folder."))
 
 	binCmd.SetUsageTemplate(usageTemplate(""))
 }
