@@ -37,6 +37,26 @@ var binCmd = &cobra.Command{
 		opt := getOptions(cmd)
 		seq.ValidateSeq = false
 
+		var fhLog *os.File
+		if opt.Log2File {
+			fhLog = addLog(opt.LogFile, opt.Verbose)
+		}
+
+		verbose := opt.Verbose
+		outputLog := opt.Verbose || opt.Log2File
+
+		timeStart := time.Now()
+		defer func() {
+			if outputLog {
+				log.Info()
+				log.Infof("elapsed time: %s", time.Since(timeStart))
+				log.Info()
+			}
+			if opt.Log2File {
+				fhLog.Close()
+			}
+		}()
+
 		bin_unique := getFlagBool(cmd, "bin-unique-reads")
 		outDirectory := getFlagString(cmd, "out-dir")
 
@@ -62,13 +82,12 @@ var binCmd = &cobra.Command{
 			checkError(fmt.Errorf("invalid value of buffer size. supported unit: K, M, G"))
 		}
 
-		verbose := opt.Verbose
 		//outputLog := opt.Verbose || opt.Log2File
 		report := getFlagString(cmd, "report")
 
 		if isStdin(report) {
 			log.Info("  no files given, reading from stdin")
-		} else {
+		} else if outputLog {
 			log.Infof("Input file given: %s", report)
 		}
 
@@ -122,7 +141,10 @@ var binCmd = &cobra.Command{
 
 		var search_val *SearchFields
 
-		log.Info("Reading binned data.")
+		if outputLog {
+			log.Info("Reading binned data.")
+		}
+
 		for scanner.Scan() {
 			line = scanner.Text()
 			if line == "" {
@@ -143,7 +165,9 @@ var binCmd = &cobra.Command{
 			}
 		}
 		allInputs_l := len(allInputs)
-		log.Infof("Sequences listed in output: %d", allInputs_l)
+		if outputLog {
+			log.Infof("Sequences listed in output: %d", allInputs_l)
+		}
 
 		checkError(scanner.Err())
 		checkError(fh.Close())
@@ -184,17 +208,17 @@ var binCmd = &cobra.Command{
 					outputWrites[UnspecifiedBin] = Append(outputWrites[UnspecifiedBin], &read)
 				}
 				SequenceTracker++
-				if (SequenceTracker%log_read_interval) == 0 && verbose {
+				if (SequenceTracker%log_read_interval) == 0 && verbose && outputLog {
 					speed := float64(SequenceTracker) / time.Since(timeStart1).Minutes()
 					fmt.Fprintf(os.Stderr, "Processed: %d of %d records %.3f matches per minute \r", SequenceTracker, allInputs_l, speed)
 					if BasesInMemory >= FlushBasesThreshold {
 						// Flush the outputs periodically to prevent the maps from growing too large
 						// causing paging to disk
 						if bin_unique {
-							WriteBinnedReads(&outputWrites_unq, file, outDirectory, UniqueBinned, false)
-							WriteBinnedReads(&outputWrites, file, outDirectory, AllBinned, true)
+							WriteBinnedReads(&outputWrites_unq, file, outDirectory, UniqueBinned, false, opt.CompressionLevel)
+							WriteBinnedReads(&outputWrites, file, outDirectory, AllBinned, true, opt.CompressionLevel)
 						} else {
-							WriteBinnedReads(&outputWrites, file, outDirectory, "", true)
+							WriteBinnedReads(&outputWrites, file, outDirectory, "", true, opt.CompressionLevel)
 						}
 						BasesInMemory = 0
 					}
@@ -202,16 +226,23 @@ var binCmd = &cobra.Command{
 			}
 
 			fastxReader.Close()
-			log.Infof("Binning records for %s", file)
+			if outputLog {
+				log.Infof("Binning records for %s", file)
+			}
+
 			if bin_unique {
-				WriteBinnedReads(&outputWrites_unq, file, outDirectory, UniqueBinned, false)
-				WriteBinnedReads(&outputWrites, file, outDirectory, AllBinned, true)
+				WriteBinnedReads(&outputWrites_unq, file, outDirectory, UniqueBinned, false, opt.CompressionLevel)
+				WriteBinnedReads(&outputWrites, file, outDirectory, AllBinned, true, opt.CompressionLevel)
 			} else {
-				WriteBinnedReads(&outputWrites, file, outDirectory, "", true)
+				WriteBinnedReads(&outputWrites, file, outDirectory, "", true, opt.CompressionLevel)
 			}
 			BasesInMemory = 0
 		}
-		log.Info("Done")
+
+		if outputLog {
+			log.Info("Done")
+		}
+
 	},
 }
 
@@ -249,10 +280,10 @@ func GetOutputFile(input_file string, output_directory string, output_name strin
 	return output
 }
 
-func WriteBinnedReads(outputs *map[string][]*[]byte, file_name string, output_directory string, nested_string string, clear_records bool) {
+func WriteBinnedReads(outputs *map[string][]*[]byte, file_name string, output_directory string, nested_string string, clear_records bool, compression_level int) {
 	for key, val := range *outputs {
 		output := GetOutputFile(file_name, output_directory, key, nested_string)
-		outfh, gw, w, err := outStream(output, true, 9)
+		outfh, gw, w, err := outStream(output, strings.HasSuffix(output, ".gz"), compression_level)
 		checkError(err)
 
 		for _, record := range val {
