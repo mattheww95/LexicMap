@@ -31,8 +31,40 @@ var FastqList []string = []string{".fastq", ".fq"}
 
 var binCmd = &cobra.Command{
 	Use:   "bin",
-	Short: "Bin input sequences based on the output of search",
-	Long:  "Bin input sequences based on teh output of search",
+	Short: "Bin input sequences based on the output of search.",
+	Long: `Distribute fasta or fastq files into separate files based on the output of a previously generated report from search. 
+	
+Previously mapped sequences can go be placed into file in which the sequence is put into a file for each genome it maps too, or
+into a folder containing each read it is mapped too along with a separate folder containing only reads that uniquely map to one genome.
+
+Output files can be gzipped depending on the input format. e.g. if the input file is gzipped, output files will be gzipped too.
+
+Output Format:
+
+Output Directory
+  ├── All
+  |   ├── Genome1.sequences
+  |   ├── Genome2.sequences
+  |
+  ├──Unique
+      ├── Genome1.unique.sequences
+      ├── Genome2.unique.sequences
+
+
+or if unique sequences are not binned.
+
+Output Directory  
+   ├── Genome1.sequences
+   ├── Genome2.sequences
+
+Example commands:
+
+$ lexicmap utils bin -r report.tsv -o /tmp/outputs ~/input.fastx
+
+Bin reads but do not make seperate output for reads uniquely binned.
+$ lexicmap utils bin -r report.tsv -u -o /tmp/outputs ~/input.fastx
+
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		opt := getOptions(cmd)
 		seq.ValidateSeq = false
@@ -142,7 +174,7 @@ var binCmd = &cobra.Command{
 		var search_val *SearchFields
 
 		if outputLog {
-			log.Info("Reading binned data.")
+			log.Info("Reading report data.")
 		}
 
 		for scanner.Scan() {
