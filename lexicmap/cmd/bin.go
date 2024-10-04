@@ -166,7 +166,7 @@ var binCmd = &cobra.Command{
 		}
 		allInputs_l := len(allInputs)
 		if outputLog {
-			log.Infof("Sequences listed in output: %d", allInputs_l)
+			log.Infof("Sequences listed in report: %d", allInputs_l)
 		}
 
 		checkError(scanner.Err())
@@ -174,7 +174,7 @@ var binCmd = &cobra.Command{
 		var record *fastx.Record
 		SequenceTracker := 0
 		var BasesInMemory uint64 = 0
-		var FlushBasesThreshold uint64 = 4_000_000_000 // Flush when x amount of bases are in memory
+		var FlushBasesThreshold uint64 = 1_000_000_000 // Flush when x amount of bases are in memory
 
 		log.Info("Assigning queries to genomes.")
 		// Organize output files
@@ -200,9 +200,10 @@ var binCmd = &cobra.Command{
 				fastq_id := string(record.ID)
 				BasesInMemory = BasesInMemory + uint64(len(record.Seq.Seq))
 				read := record.Format(0)
+
 				if val, ok := allInputs[fastq_id]; ok {
 					IdentifyBestHit(val, &outputWrites, &outputWrites_unq, &read, bin_unique)
-					val = nil // remove value from memory
+					val = nil
 				} else {
 					// Unspecified is always unique, but no need to track it twice
 					outputWrites[UnspecifiedBin] = Append(outputWrites[UnspecifiedBin], &read)
@@ -210,7 +211,7 @@ var binCmd = &cobra.Command{
 				SequenceTracker++
 				if (SequenceTracker%log_read_interval) == 0 && verbose && outputLog {
 					speed := float64(SequenceTracker) / time.Since(timeStart1).Minutes()
-					fmt.Fprintf(os.Stderr, "Processed: %d of %d records %.3f matches per minute \r", SequenceTracker, allInputs_l, speed)
+					fmt.Fprintf(os.Stderr, "Processed: %d of %d records %.3f matches per minute, bases in memory: %d \r\r", SequenceTracker, allInputs_l, speed, BasesInMemory)
 					if BasesInMemory >= FlushBasesThreshold {
 						// Flush the outputs periodically to prevent the maps from growing too large
 						// causing paging to disk
